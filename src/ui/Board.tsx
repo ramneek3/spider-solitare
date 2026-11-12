@@ -2,9 +2,10 @@ import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useStat
 import type { CSSProperties, PointerEvent as ReactPointerEvent } from 'react';
 import type { Card, GameState, Hint, Move } from '../engine/types';
 import { COLUMNS, TOTAL_RUNS } from '../engine/deck';
-import { canDeal, canDrop, isMovable } from '../engine/rules';
+import { canDeal, canDrop } from '../engine/rules';
 import { bestMoveFor } from '../engine/ranking';
 import { useFlip } from '../hooks/useFlip';
+import { sound } from '../audio';
 import { CardView, RANK_LABEL } from './CardView';
 import { SuitIcon } from './art';
 
@@ -31,12 +32,34 @@ interface DragSession {
   startY: number;
   offX: number;
   started: boolean;
-  el: HTMLElement;
+}
+
+interface Flight {
+  card: Card;
+  from: DOMRect;
+  slot: number;
 }
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
 const CARD_RATIO = 1.4;
 const TABLEAU_PAD = 14;
+
+/** A finished run flies to its foundation slot, one card after another. */
+const FLIGHT_MS = 780;
+const FLIGHT_STAGGER = 42;
+
+/** Index where the movable (face-up, same-suit, descending) run at the end of a column begins. */
+function runStart(column: Card[]): number {
+  let s = column.length - 1;
+  if (s < 0 || !column[s].faceUp) return column.length;
+  while (s > 0) {
+    const a = column[s - 1];
+    const b = column[s];
+    if (a.faceUp && a.suit === b.suit && a.rank === b.rank + 1) s--;
+    else break;
+  }
+  return s;
+}
 
 /** Vertical position of each card in a column; squeezes face-down cards first, then face-up, to fit. */
 function columnOffsets(column: Card[], ch: number, available: number): number[] {
@@ -63,28 +86,43 @@ function columnOffsets(column: Card[], ch: number, available: number): number[] 
   return ys;
 }
 
-function shake(el: HTMLElement | null) {
-  if (!el || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
-  el.animate(
-    [
-      { transform: 'translateX(0)' },
-      { transform: 'translateX(-5px)' },
-      { transform: 'translateX(5px)' },
-      { transform: 'translateX(-3px)' },
-      { transform: 'translateX(0)' },
-    ],
-    { duration: 260, easing: 'ease-out' },
-  );
+const reducedMotion = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+/** "Not allowed": a quick side-to-side wobble with a little tilt. */
+function wobble(els: Iterable<Element>) {
+  if (reducedMotion()) return;
+  for (const el of els) {
+    el.animate(
+      [
+        { transform: 'translateX(0) rotate(0deg)' },
+        { transform: 'translateX(-7px) rotate(-2deg)' },
+        { transform: 'translateX(6px) rotate(1.6deg)' },
+        { transform: 'translateX(-4px) rotate(-1deg)' },
+        { transform: 'translateX(2px) rotate(0.4deg)' },
+        { transform: 'translateX(0) rotate(0deg)' },
+      ],
+      { duration: 440, easing: 'ease-out' },
+    );
+  }
 }
 
 export const Board = memo(function Board({ game, gameId, hint, message, onMove, onDeal, notify }: Props) {
   const boardRef = useRef<HTMLDivElement>(null);
   const stockRef = useRef<HTMLDivElement>(null);
+  const flightRef = useRef<HTMLDivElement>(null);
   const columnRefs = useRef<(HTMLDivElement | null)[]>([]);
   const layerRef = useRef<HTMLDivElement>(null);
   const overrides = useRef(new Map<number, DOMRect>());
   const [size, setSize] = useState({ w: 1280, h: 720 });
   const [dragView, setDragView] = useState<DragView | null>(null);
+  const [flights, setFlights] = useState<Flight[]>([]);
+  /** Foundation slots at or beyond this index are hidden while a run is still flying to them. */
+  const [pendingFrom, setPendingFrom] = useState<number | null>(null);
+  /** Foundation slots at or beyond this index play the landing stamp. */
+  const [stampFrom, setStampFrom] = useState<number | null>(null);
+  const prevGame = useRef(game);
+  const prevGameId = useRef(gameId);
+  const runTimers = useRef<number[]>([]);
 
   useLayoutEffect(() => {
     const el = boardRef.current;
@@ -110,7 +148,7 @@ export const Board = memo(function Board({ game, gameId, hint, message, onMove, 
     return { gap, padX, cw, ch, footer, tableauH };
   }, [size]);
 
-  useFlip({
+  const { vanished } = useFlip({
     root: boardRef,
     origin: stockRef,
     gameId,
@@ -120,10 +158,118 @@ export const Board = memo(function Board({ game, gameId, hint, message, onMove, 
     overrides,
   });
 
+  // ---- finished runs fly to the foundation ----------------------------------
+  const clearRunTimers = () => {
+    runTimers.current.forEach((t) => window.clearTimeout(t));
+    runTimers.current = [];
+  };
+
+  useLayoutEffect(() => {
+    const prev = prevGame.current;
+    const prevId = prevGameId.current;
+    prevGame.current = game;
+    prevGameId.current = gameId;
+
+    if (prevId !== gameId) {
+      clearRunTimers();
+      setFlights([]);
+      setPendingFrom(null);
+      setStampFrom(null);
+      return;
+    }
+    const before = prev.foundation.length;
+    const after = game.foundation.length;
+    if (after <= before) return;
+
+    // The cards that left the table are exactly the ones in the finished run(s).
+    const present = new Set<number>();
+    for (const col of game.tableau) for (const c of col) present.add(c.id);
+    for (const row of game.stock) for (const c of row) present.add(c.id);
+
+    const stockRect = stockRef.current?.getBoundingClientRect();
+    const gone: { card: Card; from: DOMRect }[] = [];
+    for (const col of prev.tableau) {
+      for (const c of col) {
+        const rect = vanished.current.get(c.id);
+        if (!present.has(c.id) && rect) gone.push({ card: c, from: rect });
+      }
+    }
+    if (stockRect) {
+      for (const row of prev.stock) {
+        for (const c of row) {
+          if (!present.has(c.id)) gone.push({ card: { ...c, faceUp: true }, from: stockRect });
+        }
+      }
+    }
+    if (gone.length === 0 || reducedMotion()) {
+      sound.run();
+      return;
+    }
+
+    gone.sort((a, b) => (a.card.suit === b.card.suit ? b.card.rank - a.card.rank : a.card.suit < b.card.suit ? -1 : 1));
+    const list: Flight[] = gone.map((g, i) => ({
+      ...g,
+      slot: Math.min(TOTAL_RUNS - 1, before + Math.floor(i / 13)),
+    }));
+
+    clearRunTimers();
+    setFlights(list);
+    setPendingFrom(before);
+    setStampFrom(null);
+    const total = (list.length - 1) * FLIGHT_STAGGER + FLIGHT_MS;
+    runTimers.current.push(
+      window.setTimeout(() => {
+        sound.run();
+        setFlights([]);
+        setPendingFrom(null);
+        setStampFrom(before);
+      }, total + 40),
+      window.setTimeout(() => setStampFrom(null), total + 800),
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [game, gameId]);
+
+  useEffect(() => clearRunTimers, []);
+
+  // Launch the flight animations once the flying clones are in the DOM.
+  useLayoutEffect(() => {
+    if (flights.length === 0) return;
+    const layer = flightRef.current;
+    const board = boardRef.current;
+    if (!layer || !board) return;
+    const slots = board.querySelectorAll<HTMLElement>('.foundation .found');
+    layer.querySelectorAll<HTMLElement>('[data-flight]').forEach((el, i) => {
+      const f = flights[i];
+      const slot = slots[f.slot];
+      if (!f || !slot) return;
+      const target = slot.getBoundingClientRect();
+      const dx = target.left + target.width / 2 - (f.from.left + f.from.width / 2);
+      const dy = target.top + target.height / 2 - (f.from.top + f.from.height / 2);
+      const scale = target.width / f.from.width;
+      const tilt = i % 2 === 0 ? 5 : -5;
+      el.animate(
+        [
+          { transform: 'translate(0, 0) scale(1) rotate(0deg)', opacity: 1, offset: 0 },
+          {
+            transform: `translate(${dx * 0.3}px, ${dy * 0.3 - 46}px) scale(1.1) rotate(${tilt * 0.5}deg)`,
+            opacity: 1,
+            offset: 0.3,
+          },
+          { transform: `translate(${dx}px, ${dy}px) scale(${scale}) rotate(${tilt}deg)`, opacity: 1, offset: 0.9 },
+          { transform: `translate(${dx}px, ${dy}px) scale(${scale}) rotate(${tilt}deg)`, opacity: 0, offset: 1 },
+        ],
+        { duration: FLIGHT_MS, delay: i * FLIGHT_STAGGER, easing: 'cubic-bezier(0.45, 0.05, 0.25, 1)', fill: 'both' },
+      );
+    });
+  }, [flights]);
+
   // ---- hints ---------------------------------------------------------------
   const hintMove = hint?.type === 'move' ? hint.move : null;
 
   // ---- drag & click --------------------------------------------------------
+  const stackEls = (col: number, index: number) =>
+    Array.from(columnRefs.current[col]?.querySelectorAll<HTMLElement>('[data-card-id]') ?? []).slice(index);
+
   const pickTarget = useCallback(
     (centerX: number, col: number, index: number): number => {
       let best = -1;
@@ -147,19 +293,24 @@ export const Board = memo(function Board({ game, gameId, hint, message, onMove, 
     columnRefs.current.forEach((el, i) => el?.classList.toggle('drop-hover', i === target));
   };
 
+  const refuse = (col: number, index: number, text: string) => {
+    sound.illegal();
+    wobble(stackEls(col, index));
+    notify(text);
+  };
+
   const onCardPointerDown = (e: ReactPointerEvent<HTMLDivElement>, col: number, index: number) => {
     if (e.button !== 0) return;
+    sound.unlock();
     const column = game.tableau[col];
     const card = column[index];
     if (!card.faceUp) return;
-    const el = e.currentTarget;
-    if (!isMovable(column, index)) {
-      shake(el);
-      notify('Only a same-suit run in descending order moves together.');
+    if (index < runStart(column)) {
+      refuse(col, index, 'Only a same-suit run in descending order moves together.');
       return;
     }
     e.preventDefault();
-    const rect = el.getBoundingClientRect();
+    const rect = e.currentTarget.getBoundingClientRect();
     const session: DragSession = {
       col,
       index,
@@ -167,7 +318,6 @@ export const Board = memo(function Board({ game, gameId, hint, message, onMove, 
       startY: e.clientY,
       offX: e.clientX - rect.left,
       started: false,
-      el,
     };
 
     const move = (ev: PointerEvent) => {
@@ -200,10 +350,11 @@ export const Board = memo(function Board({ game, gameId, hint, message, onMove, 
       if (!session.started) {
         if (cancelled) return;
         const best = bestMoveFor(game, col, index);
-        if (best) onMove(best);
-        else {
-          shake(session.el);
-          notify('No legal move for that card.');
+        if (best) {
+          sound.move();
+          onMove(best);
+        } else {
+          refuse(col, index, 'No legal move for that card.');
         }
         return;
       }
@@ -214,13 +365,21 @@ export const Board = memo(function Board({ game, gameId, hint, message, onMove, 
           overrides.current.set(Number(n.dataset.dragId), n.getBoundingClientRect());
         });
         setDragView(null);
+        sound.move();
         onMove({ from: col, index, to: target });
       } else {
         if (layer) {
           layer.style.transition = 'transform 220ms cubic-bezier(0.2, 0.8, 0.2, 1)';
           layer.style.transform = 'translate3d(0, 0, 0)';
         }
-        window.setTimeout(() => setDragView(null), 200);
+        if (!cancelled) sound.illegal();
+        window.setTimeout(() => {
+          setDragView(null);
+          if (!cancelled) {
+            // Wobble once the cards are back in place (after React un-ghosts them).
+            requestAnimationFrame(() => wobble(stackEls(col, index)));
+          }
+        }, 200);
       }
     };
     const up = (ev: PointerEvent) => finish(ev, false);
@@ -232,9 +391,19 @@ export const Board = memo(function Board({ game, gameId, hint, message, onMove, 
   };
 
   const onStockClick = () => {
-    if (game.stock.length === 0) notify('No deals left.');
-    else if (!canDeal(game)) notify('Fill every empty column before dealing.');
-    else onDeal();
+    sound.unlock();
+    if (game.stock.length === 0) {
+      sound.illegal();
+      wobble(stockRef.current ? [stockRef.current] : []);
+      notify('No deals left.');
+    } else if (!canDeal(game)) {
+      sound.illegal();
+      wobble(stockRef.current ? [stockRef.current] : []);
+      notify('Fill every empty column before dealing.');
+    } else {
+      sound.deal();
+      onDeal();
+    }
   };
 
   // Clear any stray hover class if the board re-renders mid-drag.
@@ -262,6 +431,7 @@ export const Board = memo(function Board({ game, gameId, hint, message, onMove, 
       <div className="tableau" style={{ height: layout.tableauH }}>
         {game.tableau.map((column, ci) => {
           const ys = columnOffsets(column, layout.ch, layout.tableauH - TABLEAU_PAD - 6);
+          const start = runStart(column);
           const empty = column.length === 0;
           const isHintTo = hintMove?.to === ci;
           return (
@@ -277,10 +447,13 @@ export const Board = memo(function Board({ game, gameId, hint, message, onMove, 
                 const dragging = dragView?.col === ci && i >= dragView.index;
                 const fromHint = hintMove?.from === ci && i >= hintMove.index;
                 const toHint = isHintTo && i === column.length - 1;
-                const movable = card.faceUp && isMovable(column, i);
+                const movable = card.faceUp && i >= start;
+                // Face-up cards that can't currently be moved are dimmed so the live cards stand out.
+                const dim = card.faceUp && i < start;
                 const cls = [
                   dragging ? 'ghost' : '',
                   movable ? 'grab' : '',
+                  dim ? 'dim' : '',
                   fromHint ? 'hint-from' : '',
                   toHint ? 'hint-to' : '',
                 ]
@@ -312,13 +485,17 @@ export const Board = memo(function Board({ game, gameId, hint, message, onMove, 
         <div className="foundation" aria-label={`${game.foundation.length} of ${TOTAL_RUNS} runs complete`}>
           {Array.from({ length: TOTAL_RUNS }, (_, i) => {
             const suit = game.foundation[i];
-            return suit ? (
-              <div key={`${i}-${suit}`} className={`found done ${suit === 'H' || suit === 'D' ? 'red' : 'ink'}`}>
+            if (!suit) return <div key={i} className="found" />;
+            const hidden = pendingFrom !== null && i >= pendingFrom;
+            const stamp = stampFrom !== null && i >= stampFrom;
+            return (
+              <div
+                key={`${i}-${suit}`}
+                className={`found done ${suit === 'H' || suit === 'D' ? 'red' : 'ink'}${hidden ? ' pending' : ''}${stamp ? ' stamp' : ''}`}
+              >
                 <SuitIcon suit={suit} className="found-suit" />
                 <span className="found-k">{RANK_LABEL[13]}</span>
               </div>
-            ) : (
-              <div key={i} className="found" />
             );
           })}
         </div>
@@ -362,6 +539,21 @@ export const Board = memo(function Board({ game, gameId, hint, message, onMove, 
           {dragView.items.map((it) => (
             <div key={it.card.id} className="drag-item" data-drag-id={it.card.id} style={{ left: it.left, top: it.top }}>
               <CardView card={it.card} tracked={false} full={it === dragView.items[dragView.items.length - 1]} />
+            </div>
+          ))}
+        </div>
+      )}
+
+      {flights.length > 0 && (
+        <div className="flight-layer" ref={flightRef} aria-hidden="true">
+          {flights.map((f) => (
+            <div
+              key={f.card.id}
+              className="flight"
+              data-flight
+              style={{ left: f.from.left, top: f.from.top, width: f.from.width, height: f.from.height }}
+            >
+              <CardView card={f.card} tracked={false} full />
             </div>
           ))}
         </div>

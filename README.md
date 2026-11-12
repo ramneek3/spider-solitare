@@ -20,7 +20,13 @@ npm run build    # type-check + production build into dist/
 - **Deal** from the stock (bottom right). Dealing is blocked while any column is empty.
 - **Scoring** is classic Microsoft style: start at 500, each move (deals and undo included)
   costs 1 point, each completed K→A run earns 100.
-- **Shortcuts**: `H` hint, `N` new game, `U` or `Ctrl/Cmd+Z` undo.
+- **Motion**: moved cards glide with a small lift; a finished K→A run flies, card by card, into the
+  foundation and stamps its slot.
+- **Sound**: synthesised in the browser (no audio files). A tap for a legal move, a lower double
+  bump plus a wobble for an illegal one, ticks for a deal, and a chime for a finished run.
+- **Dimmed cards**: face-up cards that can't move right now (not part of a same-suit run reaching the
+  bottom of their column) are dulled, so the live cards stand out, especially after a deal.
+- **Shortcuts**: `H` hint, `N` new game, `M` sound on/off, `U` or `Ctrl/Cmd+Z` undo.
 - The game in progress and your record (per difficulty) are saved in the browser.
 
 ## Project layout

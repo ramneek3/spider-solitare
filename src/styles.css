@@ -315,6 +315,13 @@ button {
   background: linear-gradient(168deg, var(--paper-top) 0%, var(--paper-bottom) 100%);
   border: 1px solid rgba(8, 16, 30, 0.45);
 }
+.card.face {
+  transition: filter 0.4s ease;
+}
+/* Face-up cards that can't move right now sit back so the live cards stand out. */
+.card.face.dim {
+  filter: brightness(0.82) saturate(0.85);
+}
 .card.face.red {
   color: var(--suit-red);
 }
@@ -401,6 +408,24 @@ button {
   pointer-events: none;
   will-change: transform;
 }
+.flight-layer {
+  position: fixed;
+  left: 0;
+  top: 0;
+  width: 0;
+  height: 0;
+  z-index: 55;
+  pointer-events: none;
+}
+.flight {
+  position: fixed;
+}
+.flight .card {
+  left: 0;
+  top: 0;
+  box-shadow: 0 10px 22px -8px rgba(0, 0, 0, 0.7);
+}
+
 .drag-item {
   position: fixed;
   width: var(--cw);
@@ -441,7 +466,12 @@ button {
   border: 1px solid rgba(8, 16, 30, 0.5);
   background: linear-gradient(168deg, var(--paper-top), var(--paper-bottom));
   box-shadow: 0 0 0 2px var(--thread), 0 6px 14px -6px rgba(0, 0, 0, 0.7);
-  animation: stamp 0.55s cubic-bezier(0.2, 0.9, 0.2, 1);
+}
+.found.done.pending {
+  opacity: 0;
+}
+.found.done.stamp {
+  animation: stamp 0.6s cubic-bezier(0.2, 0.9, 0.2, 1);
 }
 .found.red {
   color: var(--suit-red);

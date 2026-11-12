@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Difficulty, Hint, Move } from '../engine/types';
 import { findHint } from '../engine/ranking';
 import { useGame } from '../hooks/useGame';
+import { sound } from '../audio';
 import { formatTime } from '../hooks/stats';
 import { Board } from './Board';
 import { RANK_LABEL } from './CardView';
@@ -20,6 +21,8 @@ export function App() {
   const [pending, setPending] = useState<Pending>(null);
   const [showStats, setShowStats] = useState(false);
   const [winOpen, setWinOpen] = useState(true);
+  const [winReady, setWinReady] = useState(false);
+  const [soundOn, setSoundOn] = useState(sound.isEnabled());
   const messageTimer = useRef<number>(0);
   const hintTimer = useRef<number>(0);
 
@@ -41,8 +44,16 @@ export function App() {
     setMessage('');
   }, [game, clearHint]);
 
+  // Let the last run finish flying to the foundation before the win dialog appears.
   useEffect(() => {
-    if (g.won) setWinOpen(true);
+    if (!g.won) {
+      setWinReady(false);
+      return;
+    }
+    setWinOpen(true);
+    const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const id = window.setTimeout(() => setWinReady(true), reduce ? 300 : 2000);
+    return () => window.clearTimeout(id);
   }, [g.won, g.gameId]);
 
   const stuck = useMemo(() => !g.won && findHint(game).type === 'none', [g.won, game]);
@@ -81,11 +92,32 @@ export function App() {
     else g.restart();
   }, [g]);
 
+  const toggleSound = useCallback(() => {
+    const next = !sound.isEnabled();
+    sound.setEnabled(next);
+    setSoundOn(next);
+    if (next) {
+      sound.unlock();
+      sound.move();
+    }
+  }, []);
+
+  // Browsers only start audio after a gesture, so wake it on the first press.
+  useEffect(() => {
+    const wake = () => sound.unlock();
+    window.addEventListener('pointerdown', wake, { once: true });
+    window.addEventListener('keydown', wake, { once: true });
+    return () => {
+      window.removeEventListener('pointerdown', wake);
+      window.removeEventListener('keydown', wake);
+    };
+  }, []);
+
   const onMove = useCallback((move: Move) => g.move(move), [g.move]);
   const onDeal = useCallback(() => g.deal(), [g.deal]);
 
   // Keyboard shortcuts (ignored while a dialog is open or when typing).
-  const dialogOpen = pending !== null || showStats || (g.won && winOpen);
+  const dialogOpen = pending !== null || showStats || (g.won && winOpen && winReady);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (dialogOpen || e.altKey) return;
@@ -96,12 +128,13 @@ export function App() {
       } else if (!e.metaKey && !e.ctrlKey) {
         if (key === 'h') showHint();
         else if (key === 'n') requestNew(game.difficulty);
+        else if (key === 'm') toggleSound();
         else if (key === 'u') g.canUndo && g.undo();
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [dialogOpen, g, game.difficulty, requestNew, showHint]);
+  }, [dialogOpen, g, game.difficulty, requestNew, showHint, toggleSound]);
 
   const levelStats = g.stats[game.difficulty];
   const isBest = g.won && levelStats.bestScore === game.score;
@@ -164,6 +197,15 @@ export function App() {
           <button type="button" className="btn ghost" onClick={() => setShowStats(true)}>
             Record
           </button>
+          <button
+            type="button"
+            className="btn ghost"
+            onClick={toggleSound}
+            aria-pressed={soundOn}
+            title="Turn sound on or off (M)"
+          >
+            {soundOn ? 'Sound on' : 'Sound off'}
+          </button>
         </nav>
       </header>
 
@@ -199,7 +241,7 @@ export function App() {
 
       {showStats && <StatsDialog stats={g.stats} onClose={() => setShowStats(false)} />}
 
-      {g.won && winOpen && (
+      {g.won && winOpen && winReady && (
         <WinDialog
           difficulty={game.difficulty}
           score={game.score}
