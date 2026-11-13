@@ -24,6 +24,8 @@ npm run build    # type-check + production build into dist/
   foundation and stamps its slot.
 - **Sound**: synthesised in the browser (no audio files). A tap for a legal move, a lower double
   bump plus a wobble for an illegal one, ticks for a deal, and a chime for a finished run.
+- **Court cards**: Kings, Queens and Jacks show original double-ended portraits (drawn in SVG), with a
+  different robe colour for each suit.
 - **Dimmed cards**: face-up cards that can't move right now (not part of a same-suit run reaching the
   bottom of their column) are dulled, so the live cards stand out, especially after a deal.
 - **Shortcuts**: `H` hint, `N` new game, `M` sound on/off, `U` or `Ctrl/Cmd+Z` undo.

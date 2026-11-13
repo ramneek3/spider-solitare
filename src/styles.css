@@ -362,6 +362,15 @@ button {
   height: calc(var(--cw) * 0.19);
   fill: currentColor;
 }
+.court {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: calc(var(--cw) * 0.84);
+  height: calc(var(--cw) * 0.7);
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
 .centre {
   position: absolute;
   left: 50%;

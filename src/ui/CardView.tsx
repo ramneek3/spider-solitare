@@ -2,6 +2,7 @@ import { memo } from 'react';
 import type { CSSProperties, PointerEvent } from 'react';
 import type { Card } from '../engine/types';
 import { SuitIcon } from './art';
+import { CourtArt } from './CourtArt';
 
 export const RANK_LABEL = ['', 'A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K'];
 const SUIT_NAME = { S: 'spades', H: 'hearts', D: 'diamonds', C: 'clubs' } as const;
@@ -37,7 +38,11 @@ export const CardView = memo(function CardView({ card, style, className = '', fu
           </span>
           {full && (
             <>
-              <SuitIcon suit={card.suit} className="centre" />
+              {card.rank >= 11 ? (
+                <CourtArt rank={card.rank} suit={card.suit} className="court" />
+              ) : (
+                <SuitIcon suit={card.suit} className="centre" />
+              )}
               <span className="corner flip">
                 <span className="rank">{RANK_LABEL[card.rank]}</span>
                 <SuitIcon suit={card.suit} className="pip" />
