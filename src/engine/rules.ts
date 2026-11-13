@@ -24,13 +24,9 @@ export function canDrop(tableau: Card[][], from: number, index: number, to: numb
   return target[target.length - 1].rank === source[index].rank + 1;
 }
 
-export function hasEmptyColumn(state: GameState): boolean {
-  return state.tableau.some((col) => col.length === 0);
-}
-
-/** Dealing is only allowed while cards remain and every column holds at least one card. */
+/** Dealing is allowed whenever cards remain in the stock, even if some columns are empty. */
 export function canDeal(state: GameState): boolean {
-  return state.stock.length > 0 && !hasEmptyColumn(state);
+  return state.stock.length > 0;
 }
 
 export function isWon(state: GameState): boolean {

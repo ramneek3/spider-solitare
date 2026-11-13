@@ -17,7 +17,7 @@ npm run build    # type-check + production build into dist/
 - **Click** a card to send it to the best legal column (same-suit target first, then moves that
   uncover a face-down card, then anything else).
 - **Drag** a card or a same-suit run to choose exactly where it goes. Legal columns light up.
-- **Deal** from the stock (bottom right). Dealing is blocked while any column is empty.
+- **Deal** from the stock (bottom right). You can deal at any time, even with empty columns.
 - **Scoring** is classic Microsoft style: start at 500, each move (deals and undo included)
   costs 1 point, each completed K→A run earns 100.
 - **Motion**: moved cards glide with a small lift; a finished K→A run flies, card by card, into the

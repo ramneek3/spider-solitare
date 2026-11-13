@@ -392,14 +392,10 @@ export const Board = memo(function Board({ game, gameId, hint, message, onMove, 
 
   const onStockClick = () => {
     sound.unlock();
-    if (game.stock.length === 0) {
+    if (!canDeal(game)) {
       sound.illegal();
       wobble(stockRef.current ? [stockRef.current] : []);
       notify('No deals left.');
-    } else if (!canDeal(game)) {
-      sound.illegal();
-      wobble(stockRef.current ? [stockRef.current] : []);
-      notify('Fill every empty column before dealing.');
     } else {
       sound.deal();
       onDeal();

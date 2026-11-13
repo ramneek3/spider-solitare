@@ -80,14 +80,17 @@ describe('rules', () => {
     expect(canDrop(state.tableau, 0, 0, 0)).toBe(false);
   });
 
-  it('blocks dealing while any column is empty and allows it otherwise', () => {
+  it('allows dealing while cards remain, even when a column is empty, and not otherwise', () => {
     const row = Array.from({ length: 10 }, () => c('S', 1, false));
     const full = blank(Array.from({ length: 10 }, () => [c('S', 2)]), [row]);
     expect(canDeal(full)).toBe(true);
     const withEmpty = blank(Array.from({ length: 9 }, () => [c('S', 2)]), [row]);
-    expect(canDeal(withEmpty)).toBe(false);
-    expect(dealRow(withEmpty)).toBeNull();
+    expect(canDeal(withEmpty)).toBe(true);
+    const dealt = dealRow(withEmpty)!;
+    expect(dealt.tableau[9].map((x) => x.faceUp)).toEqual([true]); // the empty column received a card
+    expect(dealt.tableau.every((col) => col.length > 0)).toBe(true);
     expect(canDeal(blank(Array.from({ length: 10 }, () => [c('S', 2)]), []))).toBe(false);
+    expect(dealRow(blank([], []))).toBeNull();
   });
 });
 
@@ -200,12 +203,12 @@ describe('click-to-move and hints', () => {
     expect(hint.type).toBe('move');
   });
 
-  it('hint falls back to a deal, then to blocked / none', () => {
+  it('hint falls back to a deal (even with an empty column), then to none', () => {
     const row = Array.from({ length: 10 }, () => c('S', 1, false));
     const stuck = blank(Array.from({ length: 10 }, () => [c('S', 10)]), [row]);
     expect(findHint(stuck)).toEqual({ type: 'deal' });
-    const blockedState = blank(Array.from({ length: 9 }, () => [c('S', 10)]), [row]);
-    expect(findHint(blockedState)).toEqual({ type: 'blocked' });
+    const withEmpty = blank(Array.from({ length: 9 }, () => [c('S', 10)]), [row]);
+    expect(findHint(withEmpty)).toEqual({ type: 'deal' });
     expect(findHint(blank(Array.from({ length: 10 }, () => [c('S', 10)]), []))).toEqual({ type: 'none' });
   });
 });

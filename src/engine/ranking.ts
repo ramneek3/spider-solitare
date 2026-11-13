@@ -1,6 +1,6 @@
 import type { GameState, Hint, Move } from './types';
 import { COLUMNS } from './deck';
-import { canDeal, canDrop, hasEmptyColumn, isMovable } from './rules';
+import { canDeal, canDrop, isMovable } from './rules';
 
 /** Score at or below this marks a legal but pointless move (e.g. a whole column onto an empty one). */
 export const POINTLESS = -1000;
@@ -78,6 +78,5 @@ export function findHint(state: GameState): Hint {
   }
   if (best) return { type: 'move', move: best };
   if (canDeal(state)) return { type: 'deal' };
-  if (state.stock.length > 0 && hasEmptyColumn(state)) return { type: 'blocked' };
   return { type: 'none' };
 }

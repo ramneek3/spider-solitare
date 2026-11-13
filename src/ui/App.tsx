@@ -75,7 +75,6 @@ export function App() {
           : `Move the ${name} to the empty column.`,
       );
     } else if (h.type === 'deal') notify('No useful moves. Deal a new row.');
-    else if (h.type === 'blocked') notify('No useful moves. Fill every empty column, then deal.');
     else notify('No moves left. Undo, replay this deal, or start a new game.');
   }, [g.won, game, notify]);
 
@@ -166,6 +165,21 @@ export function App() {
           ))}
         </div>
 
+      </header>
+
+      <main className="stage">
+        <Board
+          game={game}
+          gameId={g.gameId}
+          hint={hint}
+          message={status}
+          onMove={onMove}
+          onDeal={onDeal}
+          notify={notify}
+        />
+      </main>
+
+      <footer className="dock">
         <dl className="readout">
           <div>
             <dt>Score</dt>
@@ -207,19 +221,7 @@ export function App() {
             {soundOn ? 'Sound on' : 'Sound off'}
           </button>
         </nav>
-      </header>
-
-      <main className="stage">
-        <Board
-          game={game}
-          gameId={g.gameId}
-          hint={hint}
-          message={status}
-          onMove={onMove}
-          onDeal={onDeal}
-          notify={notify}
-        />
-      </main>
+      </footer>
 
       {pending && (
         <ConfirmDialog

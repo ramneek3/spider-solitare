@@ -79,7 +79,8 @@ button {
   pointer-events: none;
 }
 
-.topbar {
+.topbar,
+.dock {
   position: relative;
   z-index: 5;
   display: flex;
@@ -87,10 +88,15 @@ button {
   align-items: center;
   justify-content: space-between;
   gap: 12px 28px;
-  padding: 12px clamp(16px, 2.2vw, 40px);
+  padding: 10px clamp(16px, 2.2vw, 40px);
   background: rgba(8, 17, 30, 0.5);
   backdrop-filter: blur(8px);
+}
+.topbar {
   border-bottom: 1px solid rgba(212, 175, 106, 0.16);
+}
+.dock {
+  border-top: 1px solid rgba(212, 175, 106, 0.16);
 }
 
 .brand {

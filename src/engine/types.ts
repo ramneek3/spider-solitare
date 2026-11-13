@@ -32,5 +32,4 @@ export interface Move {
 export type Hint =
   | { type: 'move'; move: Move }
   | { type: 'deal' }
-  | { type: 'blocked' }
   | { type: 'none' };
